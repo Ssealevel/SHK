@@ -3,6 +3,7 @@ import scipy
 from scipy.interpolate import interp1d
 from scipy.optimize import basinhopping
 
+
 # Constants according to Perdelwitz et al. 2021
 lam_K = 3933.66
 lam_k1, lam_k2 = lam_K-2.25, lam_K+2.75
