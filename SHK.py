@@ -2,7 +2,7 @@ import numpy as np
 import scipy
 from scipy.interpolate import interp1d
 from scipy.optimize import basinhopping
-
+import matplotlib.pyplot as plt
 
 # Constants according to Perdelwitz et al. 2021
 lam_K = 3933.66
@@ -15,7 +15,8 @@ sigma_SB = 5.6703744191844314e-05
 
 # TODO: change the path
 Teff_grid = np.arange(2300, 7001, 100)
-grid_dir = '../spe_grid/PFS_SHK_phoenix_grid/'
+grid_dir = './PFS_SHK_phoenix_grid/'
+verify_plot_dir = './verify_plot/'
 
 # Load the spectrum and blaze for order 1 and 2, then normalize the spectrum
 def read_norm_spectrum(spe_f, blaze_f):
@@ -64,26 +65,59 @@ def neg_like_ccf(z, w, spe_ms, w_th, spe_th):
     corr = np.sum((spe_th_interp - spe_ms)**2)
     return corr
 
+def verify_plot(w, spe_ms, w_th, spe_th, z_best, target):
+    plt.figure(figsize=(10, 6))
+    w_shifted = w / (1.0 + z_best)   
+    plt.plot(w_shifted, spe_ms, label="Shifted Observed Spectrum", color="blue")  #Plot the observed spectrum
+    plt.plot(w_th, spe_th, label=f"Theoretical Spectrum (z={z_best:.6f})", color="red") #Plot the shifted Observed spectrum
+    plt.xlabel('Wavelength')
+    plt.ylabel('Flux')
+    plt.title('Theoretical vs Shifted Observed Spectrum')
+    plt.legend()
+    plt.xlim((min(w), max(w)))
+    plt.savefig(verify_plot_dir + f'/verify_plot_z_{target}.png')  #Save the plot
+    plt.close()
+
 # Find the reshift of this observed spectrum using the model spec
-def fit_z(w, spe_ms, w_th, spe_th, init_z=0.0001, niter=1000):
-    # w, spe_ms = measured wavelength and flux
-    # w_th, spe_th = theoretical
-    # init_z = initial guess for z
-    # niter = number of iterations for basinhopping
-    # Written by SXW, 2024/8/26
+def fit_z(w, spe_ms, w_th, spe_th, init_z=0.0001, niter=1000, verify=True):
+    left_cut = 2000
+    right_cut = 9000
+    fit_w = w[left_cut:right_cut]
+    fit_spe_ms = spe_ms[left_cut:right_cut]
+
+    nan_ind = np.isnan(fit_spe_ms) | np.isinf(fit_spe_ms)
+    fit_w = fit_w[~nan_ind]
+    fit_spe_ms = fit_spe_ms[~nan_ind]
+    fit_spe_ms = fit_spe_ms / np.max(fit_spe_ms)
+
+    buffer = 2.0
+    obsw_max = np.max(fit_w) - buffer
+    obsw_min = np.min(fit_w) + buffer
+    ind_ref = np.where((w_th>obsw_min)&(w_th<obsw_max))[0]
+    wv_ref = w_th[ind_ref]
+    spe_ref = spe_th[ind_ref]
     
-    minimizer_kwargs = {"method": "L-BFGS-B", "args":(w, spe_ms, w_th, spe_th)}
+    # verify_plot(fit_w, fit_spe_ms, wv_ref, spe_ref, init_z, target)
+
+    minimizer_kwargs = {"method": "L-BFGS-B", "args":(fit_w, fit_spe_ms, wv_ref, spe_ref)}
     ret = basinhopping(neg_like_ccf, [init_z], minimizer_kwargs=minimizer_kwargs, niter=niter)
     
     if ret.success:
-        return ret.x[0]  # z value best-fit
+        z_best = ret.x[0]
+        # Call verify_plot if verify is True
+        if verify:
+            verify_plot(fit_w, fit_spe_ms, wv_ref, spe_ref, z_best, target)
+        return z_best  # z value best-fit
     else:
         print("Convergence on z failed!")
+        if verify:
+            verify_plot(fit_w, fit_spe_ms, wv_ref, spe_ref, 0., target)
         return 0.0
 
 # Shift the observed spectrum onto the model's wavelength spectrum
 def shift_wavelength(w_th, spe_th, w_tharK, spe_msK, w_tharH, spe_msH):
     z = fit_z(w_tharH, spe_msH, w_th, spe_th)
+    print(z) # for test
     w_shiftK = w_tharK / (1+z)
     w_shiftH = w_tharH / (1+z)
     return w_shiftK, w_shiftH
@@ -176,9 +210,9 @@ if __name__ == '__main__':
     target = 'hd13808'
     # target = 'hd20155'
     # target = 'hip27323'
-    spe_f = f'../data/{target}.dat'
-    blaze_f = f'../data/nf_n66_15.dat'
-    thar_f = f'../data/tharws/n66.4226.tharws.sav'
+    spe_f = f'./test_data/spectra/{target}.dat'
+    blaze_f = f'./test_data/blaze/nf_n66_15.dat'
+    thar_f = f'./test_data/tharws/n66.4226.tharws.sav'
     Teff = 5002
 
     wK, speK, speKerr, wH, speH, speHerr = read_norm_spectrum(spe_f, blaze_f)
